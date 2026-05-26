@@ -1,0 +1,111 @@
+---
+- name: Production Test - OSPFv2 Lifecycle
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: "STEP 1: Prerequisite - Ensure VRF 'blue' and Subinterface exist"
+      # Using your previously built L3 module to set the stage
+      netopschic.srlinux.srlinux_l3_interface: 
+        config:
+          - name: ethernet-1/5
+            index: 0
+            admin_state: enable
+            description: WAN uplink
+            ipv4_address: 192.0.2.1/30
+            network_instance: blue
+        state: merged
+
+    - name: "STEP 2: Create OSPFv2 Configuration"
+      netopschic.srlinux.srlinux_ospf_v2:
+        config:
+          network_instance: blue
+          router_id: "1.1.1.1"
+          admin_state: enable
+          reference_bandwidth: 10000
+          overload:
+            admin_state: enable           
+            on_startup:
+              enabled: true
+              timeout: 300                
+          timers:
+            spf:
+              initial_delay: 50
+              secondary_delay: 100
+              max_delay: 200
+            lsa:
+              initial_delay: 10
+              secondary_delay: 20
+              max_delay: 40
+          areas:
+            - area_id: "0.0.0.0"
+              area_range:
+                - prefix: "192.0.2.0/24"
+                  advertise: true
+              interfaces:
+                - name: ethernet-1/5.0
+                  admin_state: enable
+                  metric: 10
+                  priority: 1
+                  hello_interval: 10
+                  dead_interval: 40
+                  interface_type: point-to-point
+                  passive: false
+        state: merged
+      register: ospf_create
+
+    - name: "STEP 3: Verify Idempotency (Should be changed: false)"
+      netopschic.srlinux.srlinux_ospf_v2:
+        config:
+          network_instance: blue
+          router_id: "1.1.1.1"
+          admin_state: enable
+          reference_bandwidth: 10000
+          overload:
+            admin_state: enable           
+            on_startup:
+              enabled: true
+              timeout: 300                
+          timers:
+            spf:
+              initial_delay: 50
+              secondary_delay: 100
+              max_delay: 200
+            lsa:
+              initial_delay: 10
+              secondary_delay: 20
+              max_delay: 40
+          areas:
+            - area_id: "0.0.0.0"
+              area_range:
+                - prefix: "192.0.2.0/24"
+                  advertise: true
+              interfaces:
+                - name: ethernet-1/5.0
+                  admin_state: enable
+                  metric: 10
+                  priority: 1
+                  hello_interval: 10
+                  dead_interval: 40
+                  interface_type: point-to-point
+                  passive: false
+        state: merged
+      register: ospf_idem
+
+    - name: "STEP 4: Delete OSPFv2 Configuration"
+      netopschic.srlinux.srlinux_ospf_v2:
+        # For deletion, we only need the primary keys
+        config:
+          network_instance: blue
+          instance_name: default
+        state: deleted
+      register: ospf_delete
+
+    - name: "STEP 5: Assert Lifecycle Success"
+      assert:
+        that:
+          - ospf_create.changed == true
+          - ospf_idem.changed == false
+          - ospf_delete.changed == true
+        success_msg: "All tests passed! The OSPF module is production ready."
+        fail_msg: "A lifecycle stage failed. Check the logs above!"

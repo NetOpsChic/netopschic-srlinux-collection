@@ -1,0 +1,37 @@
+---
+- name: Production Test - L3 Interface Lifecycle
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: "STEP 1: Create IP-VRF"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "tenant-a"
+            type: "ip-vrf"
+            admin_state: "enable"
+        state: merged
+
+    - name: "STEP 2: Configure L3 Interface and Bind"
+      netopschic.srlinux.srlinux_l3_interface:
+        config:
+          - name: ethernet-1/4
+            index: 0
+            description: "Gateway to Tenant A"
+            admin_state: enable
+            ipv4_address: "10.100.1.1/24"
+            network_instance: tenant-a
+        state: merged
+      register: l3_result
+
+    - name: "STEP 3: Verify Idempotency"
+      netopschic.srlinux.srlinux_l3_interface:
+        config:
+          - name: ethernet-1/4
+            index: 0
+            description: "Gateway to Tenant A"
+            admin_state: enable
+            ipv4_address: "10.100.1.1/24"
+            network_instance: tenant-a
+        state: merged
+      register: l3_idem

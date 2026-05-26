@@ -1,0 +1,47 @@
+---
+- name: Test SR Linux Banner Module
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: 1. Set BOTH banners (Testing the batch 'replace')
+      netopschic.srlinux.srlinux_banner:
+        config:
+          login_banner: "WARNING: Authorized Personnel Only."
+          motd_banner: "Welcome to Node 1. Maintenance at midnight."
+        state: merged
+      register: result_batch
+
+    - name: Show the output of the batch update
+      ansible.builtin.debug:
+        var: result_batch
+
+    - name: 2. Update ONLY the MOTD (Testing single update logic)
+      netopschic.srlinux.srlinux_banner:
+        config:
+          motd_banner: "Maintenance completed. System is stable."
+        state: merged
+      register: result_motd
+
+    - name: Show the output of the MOTD update
+      ansible.builtin.debug:
+        var: result_motd
+
+    - name: 3. Delete ONLY the Login Banner (Testing granular delete)
+      netopschic.srlinux.srlinux_banner:
+        config:
+          login_banner: ""
+        state: deleted
+      register: result_delete_single
+
+    - name: Show the output of the granular delete
+      ansible.builtin.debug:
+        var: result_delete_single
+
+    - name: 4. Factory Reset (Testing the 'Nuke' delete)
+      netopschic.srlinux.srlinux_banner:
+        state: deleted
+      register: result_delete_all
+
+    - name: Show the output of the factory reset
+      ansible.builtin.debug:
+        var: result_delete_all

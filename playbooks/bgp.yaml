@@ -1,0 +1,78 @@
+---
+- name: Production Test - BGP Lifecycle
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: "STEP 1: Apply Initial BGP Config"
+      netopschic.srlinux.srlinux_bgp:
+        config:
+          network_instance: default
+          admin_state: enable
+          router_id: 10.0.0.1
+          autonomous_system: 65001
+          groups:
+            - group_name: UNDERLAY
+              peer_as: 65002
+              admin_state: enable
+              afi_safi:
+                - afi_safi_name: ipv4-unicast
+                  admin_state: enable
+          neighbors:
+            - peer_address: 192.168.1.2
+              peer_group: UNDERLAY
+              description: "To Spine 1"
+              timers:
+                hold_time: 9
+                keepalive_interval: 3
+              afi_safi:
+                - afi_safi_name: ipv4-unicast
+                  admin_state: enable
+        state: merged
+      register: bgp_result
+
+    - name: "STEP 2: Verify Idempotency (Should return changed: false)"
+      netopschic.srlinux.srlinux_bgp:
+        config:
+          network_instance: default
+          admin_state: enable
+          router_id: 10.0.0.1
+          autonomous_system: 65001
+          groups:
+            - group_name: UNDERLAY
+              peer_as: 65002
+              admin_state: enable
+              afi_safi:
+                - afi_safi_name: ipv4-unicast
+                  admin_state: enable
+          neighbors:
+            - peer_address: 192.168.1.2
+              peer_group: UNDERLAY
+              description: "To Spine 1"
+              timers:
+                hold_time: 9
+                keepalive_interval: 3
+              afi_safi:
+                - afi_safi_name: ipv4-unicast
+                  admin_state: enable
+        state: merged
+      register: bgp_idem
+
+    - name: "STEP 3: Assert Idempotency"
+      ansible.builtin.assert:
+        that:
+          - "bgp_idem.changed == false"
+        fail_msg: "Idempotency failed! The module pushed changes when none were needed."
+
+    - name: "STEP 4: Cleanup BGP"
+      netopschic.srlinux.srlinux_bgp:
+        config:
+          network_instance: default
+        state: deleted
+      register: bgp_deleted
+
+    - name: "STEP 5: Assert Deletion"
+      ansible.builtin.assert:
+        that:
+          - "bgp_deleted.changed == true"
+        fail_msg: "Deletion failed! The module did not remove the configuration."

@@ -1,0 +1,76 @@
+---
+- name: Production Test - Static Route Lifecycle
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: "STEP 1: Prerequisite - Ensure VRF 'blue' exists"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "blue"
+            type: "ip-vrf"
+            admin_state: "enable"
+        state: merged
+
+    - name: "STEP 2: Create Static Routes and NHGs"
+      netopschic.srlinux.srlinux_static_routes:
+        config:
+          network_instance: blue
+          next_hop_groups:
+            - name: nhg1
+              admin_state: enable
+              nexthops:
+                - index: 1
+                  ip_address: 10.0.0.2
+          routes:
+            - prefix: 192.0.2.0/24
+              admin_state: enable
+              metric: 10
+              preference: 5
+              next_hop_group: nhg1
+            - prefix: 198.51.100.0/24
+              admin_state: enable
+        state: merged
+      register: route_create
+
+    - name: "STEP 3: Verify Idempotency (Should be changed: false)"
+      netopschic.srlinux.srlinux_static_routes:
+        config:
+          network_instance: blue
+          next_hop_groups:
+            - name: nhg1
+              admin_state: enable
+              nexthops:
+                - index: 1
+                  ip_address: 10.0.0.2
+          routes:
+            - prefix: 192.0.2.0/24
+              admin_state: enable
+              metric: 10
+              preference: 5
+              next_hop_group: nhg1
+            - prefix: 198.51.100.0/24
+              admin_state: enable
+        state: merged
+      register: route_idem
+
+    - name: "STEP 4: Delete Static Routes and NHGs"
+      netopschic.srlinux.srlinux_static_routes:
+        # For deletion, we only need the primary keys (VRF, NHG name, and Route Prefix)
+        config:
+          network_instance: blue
+          next_hop_groups:
+            - name: nhg1
+          routes:
+            - prefix: 192.0.2.0/24
+            - prefix: 198.51.100.0/24
+        state: deleted
+      register: route_delete
+
+    - name: "STEP 5: Assert Lifecycle Success"
+      assert:
+        that:
+          - route_create.changed == true
+          - route_idem.changed == false
+          - route_delete.changed == true
+        success_msg: "All tests passed! The module is production ready."
+        fail_msg: "A lifecycle stage failed. Check the logs above!"

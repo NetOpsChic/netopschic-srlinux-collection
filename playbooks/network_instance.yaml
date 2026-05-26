@@ -1,0 +1,99 @@
+---
+- name: Test SR Linux Network Instance Batch Processor
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    # ---------------------------------------------------------
+    # PHASE 1: Creation (Initial Setup)
+    # ---------------------------------------------------------
+    - name: "Phase 1: Create a batch of mixed VRFs"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "lan-vrf"
+            type: "mac-vrf"
+            description: "Layer 2 Switching Domain"
+            admin_state: "enable"
+          - name: "blue"
+            type: "ip-vrf"
+            description: "Tenant Blue Routing"
+            admin_state: "enable"
+            router_id: "10.0.0.1"
+          - name: "red"
+            type: "ip-vrf"
+            description: "Tenant Red Routing (Offline)"
+            admin_state: "disable"
+            router_id: "10.0.0.2"
+        state: merged
+      register: phase1_output
+
+    - name: "Show Phase 1 Results"
+      debug:
+        var: phase1_output.results
+
+    # ---------------------------------------------------------
+    # PHASE 2: Idempotency (The "Amnesia" Test)
+    # ---------------------------------------------------------
+    - name: "Phase 2: Run the EXACT same config again (Should be changed: false)"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "lan-vrf"
+            type: "mac-vrf"
+            description: "Layer 2 Switching Domain"
+            admin_state: "enable"
+          - name: "blue"
+            type: "ip-vrf"
+            description: "Tenant Blue Routing"
+            admin_state: "enable"
+            router_id: "10.0.0.1"
+          - name: "red"
+            type: "ip-vrf"
+            description: "Tenant Red Routing (Offline)"
+            admin_state: "disable"
+            router_id: "10.0.0.2"
+        state: merged
+
+    # ---------------------------------------------------------
+    # PHASE 3: Modification (Partial Updates & Additions)
+    # ---------------------------------------------------------
+    - name: "Phase 3: Modify existing VRFs and Add a new one"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          # lan-vrf: Changing only the description
+          - name: "lan-vrf"
+            type: "mac-vrf"
+            description: "UPDATED: L2 Domain"
+          # blue: Changing only the router-id
+          - name: "blue"
+            type: "ip-vrf"
+            router_id: "10.100.100.1"
+          # red: Bringing it online (enable)
+          - name: "red"
+            type: "ip-vrf"
+            admin_state: "enable"
+          # green: A completely new VRF added to the batch
+          - name: "green"
+            type: "ip-vrf"
+            description: "Brand new VRF"
+        state: merged
+      register: phase3_output
+
+    # ---------------------------------------------------------
+    # PHASE 4: Granular Deletion
+    # ---------------------------------------------------------
+    - name: "Phase 4: Delete ONLY Tenant Red"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "red"
+        state: deleted
+
+    # ---------------------------------------------------------
+    # PHASE 5: Factory Cleanup
+    # ---------------------------------------------------------
+    - name: "Phase 5: Clean up the rest of the VRFs"
+      netopschic.srlinux.srlinux_network_instance:
+        config:
+          - name: "lan-vrf"
+          - name: "blue"
+          - name: "green"
+        state: deleted

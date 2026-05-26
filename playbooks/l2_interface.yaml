@@ -1,0 +1,104 @@
+---
+- name: Production Readiness Test - SR Linux L2 Interface
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # TEST 1: Initial Creation (The "Build" Phase)
+    # -------------------------------------------------------------------------
+    - name: "TEST 1: Create Trunk and Access interfaces"
+      netopschic.srlinux.l2_interface:
+        config:
+          - name: ethernet-1/2
+            index: 0
+            description: "Production Trunk"
+            admin_state: enable
+            trunk_vlans: [10, 20, 30]
+            network_instance: lan-vrf
+          - name: ethernet-1/2
+            index: 10
+            description: "Separate Subinterface on same port"
+            admin_state: enable
+            access_vlan: 100
+            network_instance: lan-vrf
+        state: merged
+      register: test1
+
+    - name: Verify Test 1 - Should be Changed
+      assert:
+        that:
+          - test1.changed == true
+          - test1.results | length == 2
+
+    # -------------------------------------------------------------------------
+    # TEST 2: Idempotency (The "Amnesia" Test)
+    # -------------------------------------------------------------------------
+    - name: "TEST 2: Run identical config (Should be Green)"
+      netopschic.srlinux.l2_interface:
+        config:
+          - name: ethernet-1/2
+            index: 0
+            description: "Production Trunk"
+            admin_state: enable
+            trunk_vlans: [10, 20, 30]
+            network_instance: lan-vrf
+          - name: ethernet-1/2
+            index: 10
+            description: "Separate Subinterface on same port"
+            admin_state: enable
+            access_vlan: 100
+            network_instance: lan-vrf
+        state: merged
+      register: test2
+
+    - name: Verify Test 2 - MUST BE FALSE (Cures Amnesia)
+      assert:
+        that:
+          - test2.changed == false
+
+    # -------------------------------------------------------------------------
+    # TEST 3: Granular Update (The "Merge" Test)
+    # -------------------------------------------------------------------------
+    - name: "TEST 3: Modify only description and admin-state"
+      netopschic.srlinux.l2_interface:
+        config:
+          - name: ethernet-1/2
+            index: 0
+            description: "Updated Description Only"
+            admin_state: disable  # Shutdown the trunk
+            trunk_vlans: [10, 20, 30]
+            network_instance: lan-vrf
+        state: merged
+      register: test3
+
+    - name: Verify Test 3 - Change should happen
+      assert:
+        that:
+          - test3.changed == true
+
+    # -------------------------------------------------------------------------
+    # TEST 4: Surgical Deletion (The "Safety" Test)
+    # -------------------------------------------------------------------------
+    - name: "TEST 4: Delete ONLY index 10 (index 0 must survive)"
+      netopschic.srlinux.l2_interface:
+        config:
+          - name: ethernet-1/2
+            index: 10
+        state: deleted
+      register: test4
+
+    - name: Verify Test 4
+      assert:
+        that:
+          - test4.changed == true
+
+    # -------------------------------------------------------------------------
+    # TEST 5: Total Cleanup
+    # -------------------------------------------------------------------------
+    - name: "TEST 5: Factory Reset the physical port"
+      netopschic.srlinux.l2_interface:
+        config:
+          - name: ethernet-1/2
+            index: 0
+        state: deleted

@@ -1,0 +1,75 @@
+---
+- name: Production Test - Routing Policy Lifecycle
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: "STEP 1: Apply Initial Routing Policy"
+      netopschic.srlinux.srlinux_routing_policy:
+        config:
+          prefix_sets:
+            - name: connected-subnets
+              prefixes:
+                - ip_prefix: 10.0.0.0/24
+                  mask_length_range: 24..24
+                - ip_prefix: 192.0.2.0/24
+                  mask_length_range: 24..24
+          policies:
+            - name: export-connected
+              statements:
+                - name: connected
+                  match:
+                    prefix_set: connected-subnets
+                  action:
+                    policy_result: accept
+                - name: all
+                  action:
+                    policy_result: reject
+        state: merged
+      register: policy_result
+
+    - name: "STEP 2: Verify Idempotency (Should return changed: false)"
+      netopschic.srlinux.srlinux_routing_policy:
+        config:
+          prefix_sets:
+            - name: connected-subnets
+              prefixes:
+                - ip_prefix: 10.0.0.0/24
+                  mask_length_range: 24..24
+                - ip_prefix: 192.0.2.0/24
+                  mask_length_range: 24..24
+          policies:
+            - name: export-connected
+              statements:
+                - name: connected
+                  match:
+                    prefix_set: connected-subnets
+                  action:
+                    policy_result: accept
+                - name: all
+                  action:
+                    policy_result: reject
+        state: merged
+      register: policy_idem
+
+    - name: "STEP 3: Assert Idempotency"
+      ansible.builtin.assert:
+        that:
+          - "policy_idem.changed == false"
+        fail_msg: "Idempotency failed! The module pushed changes when none were needed."
+
+    - name: "STEP 4: Cleanup Policies"
+      netopschic.srlinux.srlinux_routing_policy:
+        config:
+          prefix_sets:
+            - name: connected-subnets
+          policies:
+            - name: export-connected
+        state: deleted
+      register: policy_deleted
+
+    - name: "STEP 5: Assert Deletion"
+      ansible.builtin.assert:
+        that:
+          - "policy_deleted.changed == true"
+        fail_msg: "Deletion failed! The module did not remove the configuration."

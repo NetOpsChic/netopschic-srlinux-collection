@@ -1,0 +1,253 @@
+---
+- name: NetOpsChic Production Readiness Crucible
+  hosts: all
+  gather_facts: false
+  vars:
+    test_ni_name: "VRF-PROD-TEST"
+    test_l3_interface: "ethernet-1/1.10"
+    test_l2_interface: "ethernet-1/2.20"
+    
+  tasks:
+    # ==========================================
+    # PHASE 1: THE BUILD (BOTTOM-UP)
+    # ==========================================
+    - name: "PHASE 1 - Apply System & Interfaces"
+      block:
+        - name: "Set Hostname"
+          netopschic.srlinux.srlinux_hostname:
+            config:
+              hostname: "srl-prod-core"
+            state: merged
+          register: res_hostname
+
+        - name: "Set Banner"
+          netopschic.srlinux.srlinux_banner:
+            config:
+              login_banner: "UNAUTHORIZED ACCESS PROHIBITED - AUDITED SYSTEM"
+            state: merged
+          register: res_banner
+
+        - name: "Configure L3 Subinterface"
+          netopschic.srlinux.srlinux_l3_interface:
+            config:
+            - interface: "{{ test_l3_interface }}"
+              admin_state: "enable"
+              ipv4_address: "10.10.10.1/30"
+            state: merged
+          register: res_l3_int
+
+        - name: "Configure L2 Subinterface"
+          netopschic.srlinux.srlinux_l2_interface:
+            config:
+            - interface: "{{ test_l2_interface }}"
+              admin_state: "enable"
+              vlan_id: 20
+            state: merged
+          register: res_l2_int
+
+    - name: "PHASE 1 - Apply VRFs & Routing Contexts"
+      block:
+        - name: "Configure Network Instance"
+          netopschic.srlinux.srlinux_network_instance:
+            config:
+            - name: "{{ test_ni_name }}"
+              type: "ip-vrf"
+              admin_state: "enable"
+              interfaces:
+                - "{{ test_l3_interface }}"
+            state: merged
+          register: res_ni
+
+        - name: "Configure Static Route"
+          netopschic.srlinux.srlinux_static_routes:
+            config:
+              - network_instance: "{{ test_ni_name }}"
+                next_hop_groups:
+                  - name: "NHG-SPINE1"
+                    admin_state: "enable"
+                    nexthops:
+                      - index: 0
+                        ip_address: "10.10.10.2"
+                routes:
+                  - prefix: "192.168.100.0/24"
+                    admin_state: "enable"
+                    next_hop_group: "NHG-SPINE1"
+            state: merged
+
+        - name: "Configure Routing Policy"
+          netopschic.srlinux.srlinux_routing_policy:
+            config:
+              prefix_sets:
+                - name: "local-subnets"
+                  prefixes:
+                    - ip_prefix: "10.10.10.0/30"
+                      mask_length_range: "exact"
+              policies:
+                - name: "export-local"
+                  statements:
+                    - name: "match-local"
+                      match:
+                        prefix_set: "local-subnets"
+                      action:
+                        policy_result: "accept"
+            state: merged
+          register: res_policy
+
+    - name: "PHASE 1 - Apply Dynamic Routing"
+      block:
+        - name: "Configure OSPFv2"
+          netopschic.srlinux.srlinux_ospf_v2:
+            config:
+              network_instance: "{{ test_ni_name }}"
+              admin_state: "enable"
+              router_id: "1.1.1.1"
+              areas:
+                - area_id: "0.0.0.0"
+                  interfaces:
+                    - name: "{{ test_l3_interface }}"
+            state: merged
+          register: res_ospf
+
+        - name: "Configure BGP"
+          netopschic.srlinux.srlinux_bgp:
+            config:
+              network_instance: "{{ test_ni_name }}"
+              admin_state: "enable"
+              router_id: "1.1.1.1"
+              autonomous_system: 65000
+              groups:
+                - group_name: "SPINE-PEERS"
+                  peer_as: 65001
+              neighbors:
+                - peer_address: "10.10.10.2"
+                  peer_group: "SPINE-PEERS"
+                #  export_policy: "export-local"
+                  timers:
+                    hold_time: 9
+                    keepalive_interval: 3
+            state: merged
+          register: res_bgp
+
+    # ==========================================
+    # PHASE 2: THE IDEMPOTENCY HAMMER
+    # ==========================================
+    - name: "PHASE 2 - Run Idempotency Checks"
+      block:
+        - name: "Re-run BGP (Expect No Changes)"
+          netopschic.srlinux.srlinux_bgp:
+            config:
+              network_instance: "{{ test_ni_name }}"
+              admin_state: "enable"
+              router_id: "1.1.1.1"
+              autonomous_system: 65000
+              groups:
+                - group_name: "SPINE-PEERS"
+                  peer_as: 65001
+              neighbors:
+                - peer_address: "10.10.10.2"
+                  peer_group: "SPINE-PEERS"
+                #  export_policy: "export-local"
+                  timers:
+                    hold_time: 9
+                    keepalive_interval: 3
+            state: merged
+          register: idem_bgp
+
+        - name: "ASSERT BGP IDEMPOTENCY"
+          ansible.builtin.assert:
+            that: "idem_bgp.changed == false"
+            fail_msg: "FATAL: BGP module failed idempotency check!"
+
+    # ==========================================
+    # PHASE 3: THE DRIFT TEST (SURGICAL UPDATES)
+    # ==========================================
+    - name: "PHASE 3 - Modify Parameters"
+      block:
+        - name: "Modify BGP Timers & Add Description"
+          netopschic.srlinux.srlinux_bgp:
+            config:
+              network_instance: "{{ test_ni_name }}"
+              admin_state: "enable"
+              router_id: "1.1.1.1"
+              autonomous_system: 65000
+              groups:
+                - group_name: "SPINE-PEERS"
+                  peer_as: 65001
+                  description: "Updated Group Desc"
+              neighbors:
+                - peer_address: "10.10.10.2"
+                  peer_group: "SPINE-PEERS"
+                #  export_policy: "export-local"
+                  timers:
+                    hold_time: 30       
+                    keepalive_interval: 10 
+            state: merged
+          register: drift_bgp
+
+        - name: "ASSERT DRIFT UPDATE"
+          ansible.builtin.assert:
+            that: "drift_bgp.changed == true"
+            fail_msg: "FATAL: BGP module failed to apply surgical updates!"
+
+    # ==========================================
+    # PHASE 4: FULL TEARDOWN (TOP-DOWN)
+    # ==========================================
+    - name: "PHASE 4 - Delete Protocols & Policies"
+      block:
+        - netopschic.srlinux.srlinux_bgp:
+            config: { network_instance: "{{ test_ni_name }}" }
+            state: deleted
+        - netopschic.srlinux.srlinux_ospf_v2:
+            config: { network_instance: "{{ test_ni_name }}" }
+            state: deleted
+        - name: "Delete Static Routes"
+          netopschic.srlinux.srlinux_static_routes:
+            config:
+              - network_instance: "{{ test_ni_name }}"
+                next_hop_groups:
+                  - name: "NHG-SPINE1"
+                routes:
+                  - prefix: "192.168.100.0/24"
+            state: deleted
+        - netopschic.srlinux.srlinux_routing_policy:
+            config:
+              policies: [{ name: "export-local" }]
+              prefix_sets: [{ name: "local-subnets" }]
+            state: deleted
+
+    - name: "PHASE 4 - Delete Interfaces & VRFs"
+      block:
+        - name: "Delete Network Instance"
+          netopschic.srlinux.srlinux_network_instance:
+            config:
+              - name: "{{ test_ni_name }}" 
+            state: deleted
+
+        - name: "Delete L3 Interface"
+          netopschic.srlinux.srlinux_l3_interface:
+            config:
+              - interface: "{{ test_l3_interface }}" 
+            state: deleted
+
+        - name: "Delete L2 Interface"
+          netopschic.srlinux.srlinux_l2_interface:
+            config:
+              - interface: "{{ test_l2_interface }}" 
+            state: deleted
+
+    # ==========================================
+    # PHASE 5: GHOST TEARDOWN CHECK
+    # ==========================================
+    - name: "PHASE 5 - Verify Clean State"
+      block:
+        - name: "Re-run VRF Delete"
+          netopschic.srlinux.srlinux_network_instance:
+            config:
+              - name: "{{ test_ni_name }}" 
+            state: deleted
+          register: ghost_vrf
+
+        - name: "ASSERT CLEAN STATE"
+          ansible.builtin.assert:
+            that: "ghost_vrf.changed == false"
+            fail_msg: "FATAL: Delete idempotency failed. Module tried to delete non-existent config."

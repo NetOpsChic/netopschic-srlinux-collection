@@ -1,0 +1,27 @@
+---
+- name: Test SR Linux Hostname Module Lifecycle
+  hosts: clab-srl-mesh-node1
+  gather_facts: false
+  tasks:
+    - name: 1. Set the hostname (Testing 'merged')
+      netopschic.srlinux.srlinux_hostname:
+        config:
+          hostname: "test-srl-01"
+        state: merged
+      register: result_set
+
+    - name: Show the output of the set task
+      ansible.builtin.debug:
+        var: result_set
+
+    - name: 2. Run the exact same task again (Testing Idempotency!)
+      netopschic.srlinux.srlinux_hostname:
+        config:
+          hostname: "test-srl-01"
+        state: merged
+      register: result_idempotent
+    
+    - name: Show the output of the set task
+      ansible.builtin.debug:
+        var: result_idempotent
+
